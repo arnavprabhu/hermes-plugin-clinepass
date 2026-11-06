@@ -84,6 +84,17 @@ def normalize(model: str | None) -> str:
     return f"cline-pass/{m}" if m else m
 
 
+def native_id(model: str | None) -> str | None:
+    """The id to send for *model*, or None to leave it alone. Bare names and short aliases gain
+    the ``cline-pass/`` prefix (``-m kimi`` would otherwise reach Cline as a bare "kimi" and get
+    "invalid model format"); other vendors' ``org/model`` ids are not ours to rewrite."""
+    m = (model or "").strip()
+    low = m.lower()
+    if not m or ("/" in m and not low.startswith(("clinepass/", "cline-pass/"))):
+        return None
+    return normalize(m)
+
+
 def model_ids() -> tuple[str, ...]:
     return tuple(MODELS)
 

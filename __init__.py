@@ -54,6 +54,9 @@ class ClinePassProfile(ProviderProfile):
                                 **context: Any) -> tuple[dict[str, Any], dict[str, Any]]:
         return reasoning.extras(reasoning_config, model), {}
 
+    def normalize_model_id(self, model: str, *, api_key: str = "") -> str | None:
+        return catalog.native_id(model)
+
     def supported_reasoning_efforts(self, model: str | None) -> tuple[str, ...] | None:
         return catalog.efforts(model)
 

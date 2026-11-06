@@ -38,6 +38,14 @@ def test_normalize_accepts_bare_prefixed_and_alias_ids():
     assert catalog.normalize("kimi") == "cline-pass/kimi-k3"
 
 
+def test_native_id_prefixes_bare_names_and_leaves_other_vendors_alone():
+    assert catalog.native_id("kimi") == "cline-pass/kimi-k3"
+    assert catalog.native_id("glm-5.3") == "cline-pass/glm-5.3"
+    assert catalog.native_id("cline-pass/qwen3.8-max") == "cline-pass/qwen3.8-max"
+    assert catalog.native_id("z-ai/glm-5.3") is None
+    assert catalog.native_id("") is None
+
+
 def test_no_alias_named_like_the_model_prefix():
     # "cline-pass" as a provider alias would read as a provider prefix in `/model cline-pass/x`.
     assert "cline-pass" not in catalog.ALIASES
