@@ -1,0 +1,14 @@
+name: clinepass
+kind: model-provider
+version: 0.1.0
+manifest_version: 2
+description: ClinePass — run Hermes on Cline's $9.99/month ClinePass subscription (GLM, Kimi, DeepSeek, Qwen, MiniMax, MiMo) over Cline's OpenAI-compatible API; Hermes owns tools, approvals and compaction
+author: Arnav Prabhu
+license: MIT
+homepage: https://github.com/arnavprabhu/hermes-plugin-clinepass
+tags: [model-provider, cline, clinepass, subscription]
+requires_hermes: ">=0.22.6"
+platforms: []
+optional_env:
+  - CLINE_API_KEY
+  - CLINEPASS_BASE_URL
