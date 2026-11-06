@@ -34,18 +34,18 @@ $ hermes -z "Use your terminal tool to run: uname -sr — then reply with only i
 Linux 7.0.0-38-generic
 ```
 
-And `/usage` (or `hermes usage --provider clinepass`):
+And `/usage` (or `hermes usage --provider clinepass`), which matches the Cline dashboard and CodexBar:
 
 ```
 📈 ClinePass limits
 Provider: clinepass (Cline Pass (Monthly))
-5-hour: 99% remaining (1% used) • $0.08 of $10.00 at reference prices
-7-day: 24% remaining (76% used) • $19.02 of $25.00 at reference prices
-30-day: 4% remaining (96% used) • at least $48.18 of $50.00 at reference prices
+5-hour: 100% remaining (0% used) • resets in 4h 28m (2026-11-06 03:15 CST)
+Weekly: 24% remaining (76% used) • resets in 2d 17h (2026-11-08 16:44 CST)
+Monthly: 53% remaining (47% used) • resets in 15d 22h (2026-11-21 20:56 CST)
 Billing period renews 2026-11-17
 ```
 
-Cline caps ClinePass by reference spend over a rolling 5 hours, 7 days and 30 days. Those dollar figures are the per-token list prices Cline uses to measure the quota, not a bill. Cline has no quota endpoint, so the plugin adds up your usage log. A busy account logs thousands of requests a day and Cline rate-limits fast paging, so the first few `/usage` calls show "at least" while the plugin backfills older pages into a small local cache. After that the numbers are exact.
+Cline caps ClinePass with a 5-hour, a weekly and a monthly window, each with its own reset time. The plugin reads them from the same endpoint CodexBar uses (`/api/v1/users/me/plan/usage-limits`). It isn't documented, so if Cline changes it, /usage goes blank instead of showing something wrong.
 
 ## Models
 
@@ -81,7 +81,7 @@ GLM 5.3 barely cached Hermes' prompt in my runs (about 50 of 19,600 prompt token
 
 The `--type oauth` import takes that login over. Cline rotates refresh tokens, so once Hermes refreshes the copy, the Cline CLI may ask you to run `cline auth` again. The plugin reads `~/.cline` once and never writes to it. If you want both tools working independently, use an API key here. `CLINEPASS_IMPORT_FROM=cline` imports the CLI's pay-as-you-go entry instead of its ClinePass one.
 
-How the pieces work (endpoints, the usage ledger, the reasoning mapping, what I verified live) is in [SPEC.md](SPEC.md).
+How the pieces work (endpoints, the reasoning mapping, credentials, what I verified live) is in [SPEC.md](SPEC.md).
 
 ## Tests
 

@@ -1,6 +1,6 @@
 [project]
 name = "hermes-plugin-clinepass"
-version = "0.1.1"
+version = "0.1.2"
 description = "Hermes Agent model-provider plugin: Cline's ClinePass subscription over its OpenAI-compatible API"
 readme = "README.md"
 license = { text = "MIT" }

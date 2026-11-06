@@ -180,108 +180,44 @@ def test_expiry_parsing():
 
 # ── usage ────────────────────────────────────────────────────────────────────────────────────
 
-NOW = datetime(2026, 11, 6, 12, tzinfo=timezone.utc)
-
-
-def _row(i, age, cost=10, model="cline-pass/glm-5.3"):
-    at = (NOW - age).isoformat().replace("+00:00", "Z")
-    return {"id": f"usg-{i:06d}", "createdAt": at, "costUsd": cost, "aiModelName": model}
-
-
-class FakeLog:
-    """Newest-first usage log served `per` rows a page with id cursors, like Cline's endpoint."""
-
-    def __init__(self, rows, per=3, fail_after=None):
-        self.rows, self.per, self.calls, self.fail_after = rows, per, 0, fail_after
-
-    def __call__(self, cursor):
-        self.calls += 1
-        if self.fail_after is not None and self.calls > self.fail_after:
-            raise usage.RateLimited()
-        start = next((i for i, r in enumerate(self.rows) if r["id"] == cursor), 0) if cursor else 0
-        page = self.rows[start:start + self.per]
-        nxt = self.rows[start + self.per]["id"] if start + self.per < len(self.rows) else ""
-        return page, nxt
-
-
-def _sync(ledger, log, pages=25):
-    return usage.sync(ledger, "acct", log, now=NOW, deadline=time.monotonic() + 60, max_pages=pages)
-
-
-def test_ledger_first_walk_then_backfill_completes():
-    rows = [_row(i, timedelta(hours=i * 12)) for i in range(20)]  # 12 h apart, ~9.5 days deep
-    ledger = usage.Ledger(":memory:")
-    log = FakeLog(rows)
-    partial = _sync(ledger, log, pages=2)          # 6 rows: back to 2.5 days
-    assert partial is not None and partial > NOW - timedelta(days=7)
-    assert _sync(ledger, log, pages=1) is not None  # head meets stored rows, 1 page budget used
-    assert _sync(ledger, log, pages=10) is None    # backfill reaches the end of the log
-    totals = ledger.totals("acct", NOW)
-    assert totals["last5HoursUsageCostUSDPerUser"] == 10           # only the row at age 0
-    assert totals["last7daysUsageCostUSDPerUser"] == 10 * 15       # ages 0..7 days, boundary inclusive
-    assert totals["last30daysUsageCostUSDPerUser"] == 10 * 20
-
-
-def test_ledger_counts_only_pass_rows():
-    rows = [_row(0, timedelta(hours=1), 100), _row(1, timedelta(hours=2), 999, model="anthropic/claude")]
-    ledger = usage.Ledger(":memory:")
-    assert _sync(ledger, FakeLog(rows)) is None
-    assert ledger.totals("acct", NOW)["last5HoursUsageCostUSDPerUser"] == 100
-
-
-def test_ledger_picks_up_new_rows_at_the_head():
-    old = [_row(i, timedelta(days=1 + i)) for i in range(3)]
-    ledger = usage.Ledger(":memory:")
-    assert _sync(ledger, FakeLog(old)) is None
-    fresh = [_row(100, timedelta(minutes=5), 50)] + old
-    assert _sync(ledger, FakeLog(fresh)) is None
-    assert ledger.totals("acct", NOW)["last5HoursUsageCostUSDPerUser"] == 50
-
-
-def test_ledger_restarts_when_the_head_cannot_reach_stored_rows():
-    old = [_row(i, timedelta(days=2 + i)) for i in range(3)]
-    ledger = usage.Ledger(":memory:")
-    _sync(ledger, FakeLog(old))
-    burst = [_row(1000 + i, timedelta(minutes=i)) for i in range(12)] + old
-    partial = _sync(ledger, FakeLog(burst), pages=2)   # 6 of 12 new rows: a gap would undercount
-    assert partial is not None
-    assert ledger.oldest("acct") > NOW - timedelta(hours=1)  # old rows dropped, coverage restarted
-
-
-def test_ledger_keeps_state_on_rate_limit():
-    rows = [_row(i, timedelta(hours=i * 12)) for i in range(20)]
-    ledger = usage.Ledger(":memory:")
-    partial = _sync(ledger, FakeLog(rows, fail_after=2))
-    assert partial is not None                       # incomplete, but no exception escapes
-    assert ledger.state("acct")[0]                   # backfill cursor kept for next time
-
-
-def test_usage_snapshot_percentages(monkeypatch):
+@pytest.fixture()
+def account_usage(monkeypatch):
     acct = types.ModuleType("agent.account_usage")
 
     class W:
         def __init__(self, **kw):
             self.__dict__.update(kw)
-    acct.AccountUsageWindow = W
-    acct.AccountUsageSnapshot = W
+    acct.AccountUsageWindow = W  # type: ignore[attr-defined]
+    acct.AccountUsageSnapshot = W  # type: ignore[attr-defined]
     monkeypatch.setitem(sys.modules, "agent", types.ModuleType("agent"))
     monkeypatch.setitem(sys.modules, "agent.account_usage", acct)
-    now = datetime(2026, 11, 6, 12, tzinfo=timezone.utc)
-    plan = {"currentPeriodEnd": "2026-11-17T15:58:04Z", "plan": {"displayName": "Cline Pass (Monthly)", "entitlements": {
-        "cline_pass": {"enabled": True, "inferenceCapThreshold": {
-            "last5HoursUsageCostUSDPerUser": 1_000_000_000, "last7daysUsageCostUSDPerUser": 2_500_000_000,
-            "last30daysUsageCostUSDPerUser": 5_000_000_000}}}}}
-    totals = {"last5HoursUsageCostUSDPerUser": 250_000_000, "last7daysUsageCostUSDPerUser": 250_000_000,
-              "last30daysUsageCostUSDPerUser": 250_000_000}
-    # The ledger reaches 3 days back: the 5-hour figure is exact, 7- and 30-day are lower bounds.
-    snap = usage.build_snapshot(plan, totals, partial_from=now - timedelta(days=3), now=now)
-    assert snap is not None
-    got = {w.label: (w.used_percent, w.detail) for w in snap.windows}
-    assert got["5-hour"] == (25.0, "$2.50 of $10.00 at reference prices")
-    assert got["7-day"][1].startswith("at least ") and got["30-day"][1].startswith("at least ")
-    complete = usage.build_snapshot(plan, totals, partial_from=None, now=now)
-    assert complete is not None and not any(w.detail.startswith("at least") for w in complete.windows)
-    assert snap.plan == "Cline Pass (Monthly)"
+
+
+LIMITS = {"limits": [  # shape captured live from /api/v1/users/me/plan/usage-limits
+    {"type": "weekly", "percentUsed": 76, "resetsAt": "2026-11-08T22:44:30.65446644Z"},
+    {"type": "five_hour", "percentUsed": 0, "resetsAt": "2026-11-06T09:15:00.652481431Z"},
+    {"type": "monthly", "percentUsed": 47, "resetsAt": "2026-11-22T02:56:07.656690999Z"}]}
+PLAN = {"currentPeriodEnd": "2026-11-17T15:58:04Z", "plan": {"displayName": "Cline Pass (Monthly)"}}
+
+
+def test_usage_maps_limits_in_order_with_resets(account_usage):
+    snap = usage.build_snapshot(LIMITS, PLAN, datetime(2026, 11, 6, 5, tzinfo=timezone.utc))
+    assert [(w.label, w.used_percent) for w in snap.windows] == [("5-hour", 0.0), ("Weekly", 76.0), ("Monthly", 47.0)]
+    assert snap.windows[1].reset_at == datetime(2026, 11, 8, 22, 44, 30, 654466, tzinfo=timezone.utc)
+    assert snap.plan == "Cline Pass (Monthly)" and snap.details == ("Billing period renews 2026-11-17",)
+
+
+def test_usage_without_plan_still_reports_limits(account_usage):
+    snap = usage.build_snapshot(LIMITS, None, datetime(2026, 11, 6, tzinfo=timezone.utc))
+    assert snap.plan == "ClinePass" and len(snap.windows) == 3
+
+
+def test_usage_ignores_malformed_rows_and_empty_payload(account_usage):
+    now = datetime(2026, 11, 6, tzinfo=timezone.utc)
+    assert usage.build_snapshot({"limits": []}, None, now) is None
+    snap = usage.build_snapshot({"limits": [{"type": "weekly", "percentUsed": "lots"},
+                                            {"type": "monthly", "percentUsed": 130, "resetsAt": "garbage"}]}, None, now)
+    assert [(w.label, w.used_percent, w.reset_at) for w in snap.windows] == [("Monthly", 100.0, None)]
 
 
 def test_usage_is_cached_per_token(monkeypatch):

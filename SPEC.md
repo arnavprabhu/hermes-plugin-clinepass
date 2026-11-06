@@ -35,15 +35,16 @@ The clamp picks the nearest weaker level the model supports, or the weakest one 
 
 ## /usage
 
-`/api/v1/users/me/plan` gives the plan name, renewal date and caps (`plan.entitlements.cline_pass.inferenceCapThreshold`: `last5HoursUsageCostUSDPerUser`, `last7daysUsageCostUSDPerUser`, `last30daysUsageCostUSDPerUser`). `/api/v1/users/{id}/usages` returns per-request rows newest first, at most 200 per page, paged with `?cursor=<nextToken>`. Caps and `costUsd` are integers in units of 1e-8 USD. For example, a request the stream reported as `cost: 0.0000302` shows up in the log as 3020, and the 5-hour cap of 1e9 is $10.
+`GET /api/v1/users/me/plan/usage-limits` (bearer: API key or `workos:` token) returns
+`{"data": {"limits": [{"type": "five_hour"|"weekly"|"monthly", "percentUsed": <0-100>, "resetsAt": <ISO>}]}}`.
+Those become Hermes usage windows (5-hour, Weekly, Monthly) with reset times, and they are the numbers the Cline
+dashboard and CodexBar show. `GET /api/v1/users/me/plan` adds the plan name and renewal date and is optional.
+Snapshots are cached for 60 s per token because Hermes may ask on every turn. Any HTTP error or unexpected shape
+returns `None`.
 
-A heavy account logs more than a thousand rows a day, and the endpoint returned 429 after about 40 pages in a few seconds. So rows are kept in `$HERMES_HOME/cache/clinepass/usage.sqlite` (account id, row id, timestamp, cost, whether it was a pass row). Each call:
-
-1. reads new pages from the head until it reaches a stored row (if it can't reach one within budget, it drops the old rows instead of leaving a gap);
-2. spends the rest of its budget (7 s, 25 pages) backfilling from a saved cursor;
-3. sums the rows whose model is `cline-pass/...` inside each window.
-
-A window that reaches further back than the ledger covers is labelled "at least". Results are cached in memory for 2 minutes per token, because Hermes may ask on every turn. Any unexpected shape, HTTP error or timeout returns `None`, and `/usage` stays empty.
+The first version summed `costUsd` from `/api/v1/users/{id}/usages` over rolling windows. That was wrong: Cline's
+windows are anchored and reset at fixed times, so the rolling 30-day sum showed 96% used while the real monthly
+window was at 47%.
 
 ## Verified live (2026-11-05)
 
@@ -51,6 +52,6 @@ A window that reaches further back than the ledger covers is labelled "at least"
 - `hermes -z` with the terminal tool on glm-5.3. A two-tool write-then-read task on deepseek-v4.1-flash.
 - Usage log rows for those requests show `aiModelTypeName: cline-pass`.
 - Cline CLI import with no `CLINE_API_KEY` set: an expired login was refreshed on import, a completion succeeded, a forced pool refresh rotated the token, and a completion and `/usage` both worked on the new token.
-- `hermes usage --provider clinepass` converging over four calls.
+- `hermes usage --provider clinepass` output matching CodexBar and the Cline dashboard (24% weekly, 53% monthly left).
 
 Not verified: whether the Cline CLI's own copy of an imported login actually stops working after Hermes refreshes it (testing that would have meant breaking a working login), and image input on each model.
